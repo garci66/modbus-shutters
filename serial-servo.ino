@@ -1,197 +1,273 @@
-#include <Servo.h>
+#include <ArduinoModbus.h>
+#include <ArduinoRS485.h>
+#include <EEPROM.h>
+#include <limits.h>
+#define GARCI_MAGIC 0xD6CC
+#define GARCI_VERSION 1
 #define SERVOPIN 3
 #define COUNTERPIN 2
-#define POTPIN A0
 #define DIRECTION_UP 1
 #define DIRECTION_DN -1
 #define DIRECTION_STOP 0
-#define FULL_SPEED_DELTA 15
-#define DIRECTION_MODE 0
-#define TARGET_MODE 1
 
-//Servo myservo;
+enum class mbCoils={cmdStepUp, cmdStepDown, cmdUp, cmdDn, cmdToggleCalibrationMode, cmdStoreMinPos, cmdStoreMaxPos, cmdResetTripped, cmdResetPosition, cmdSaveSettings, cmdReboot, cmdFactoryReset, _LAST};
+enum class mbInputs={atTop, atBottom, safetyTripped, isCalibrationMode, _LAST};
+enum class mbHoldingRegisters={baudRate100x, slaveId, servoZero, fullSpeedDelta, targetApproach10x, minPos, maxPos, stepSize, safetyInterval, reqTargetPosition, reqPercentPosition,  _LAST};
+enum class mbInputRegisters={currentPosition, currentPercentPosition, currentFalseCounter, currentTarget, _LAST}
+
+struct config {
+    uint16_t magic;
+    uint8_t version;
+    uint16_t baudRate100x;
+    uint8_t slaveId;
+    uint8_t servoZero;
+    uint8_t fullSpeedDelta;
+    uint8_t targetApproach10x;
+    int16_t lastPos;
+    int16_t minPos;
+    int16_t maxPos;
+    uint8_t stepSize;
+    uint16_t safetyInterval;
+    bool safetyTripped;
+};
+
+struct config defaultConfig {
+    GARCI_MAGIC, 
+    GARCI_VERSION,
+    96,                 //baudRate100x 
+    1,                  //slaveId
+    128,                //servoZero
+    16,                 //fullSpeedDelta
+    30,                 //targetApproach10x
+    0,                  //lastPos
+    INT16_MIN,          //minPos
+    INT16_MAX,          //maxPos
+    16,                 //stepSize
+    1000,               //safetyInterval
+    false               //safetyTripped
+};
+
+struct config runningConfig;
+ModbusRTUServer myMb;
+
 int servoVal=0;
 int servoDelta=0;
-int zeroPoint=184;
-int positionCounter=0;
-int falseCounter=0;
+int16_t positionCounter=0;
+int16_t falseCounter=0;
+bool calibrationMode=false;
+bool saveConfig=false;
 
-
-int operMode=DIRECTION_MODE;
 int currentDirection=0;
-int desiredDirection=0;
-int targetPosition=0;
-float targetApproach=3.0;
-
-int accelInterval=200;
+int16_t targetPosition=0;
 
 long lastMillis=0;
 long printMillis=0;
 
-int potread=0;
-char keyRead;
+
+
 void setup() {
-  // put your setup code here, to run once:
-  //myservo.attach(SERVOPIN);
-  Serial.begin(115200);
-  //while (!Serial);
-  Serial.println("Finished init");
-  pinMode(POTPIN, INPUT);
-  pinMode(COUNTERPIN, INPUT);
-  attachInterrupt(digitalPinToInterrupt(COUNTERPIN), updateCounter, CHANGE);
+    EEPROM.get(0,runningConfig);
+    if !(runningConfig.magic==GARCI_MAGIC && runningConfig.version==GARCI_VERSION){
+        runningConfig=defaultConfig;
+        EEPROM.put(0,runningConfig);
+    }
+    positionCounter=runningConfig.lastPos;
+    targetPosition=positionCounter;
+
+    pinMode(COUNTERPIN, INPUT);
+    attachInterrupt(digitalPinToInterrupt(COUNTERPIN), updateCounter, CHANGE);
+
+    if (!myMb.begin(runningConfig.slaveId , runningConfig.baudRate100x*100)) {
+        Serial.println("Failed to start Modbus RTU Server!");
+        while (1);
+    }
+    // configure coils at address 0x00
+    myMb.configureCoils(0x00, mbCoils::_LAST);
+    // configure discrete inputs at address 0x00
+    myMb.configureDiscreteInputs(0x00, mbInputs::_LAST);
+    // configure holding registers at address 0x00
+    myMb.configureHoldingRegisters(0x00, mbHoldingRegisters::_LAST);
+    // configure input registers at address 0x00
+    myMb.configureInputRegisters(0x00, mbInputRegisters::_LAST);
 }
+
 
 void loop() {
-  // put your main code here, to run repeatedly:
+    myMb.poll();
 
-//  potread=analogRead(POTPIN);
-//  if (potread>500){
-//    desiredDirection=DIRECTION_UP;
-//  } else if (potread <200) {
-//    desiredDirection=DIRECTION_DN;
-//  } else {
-//    desiredDirection=DIRECTION_STOP;
-//  }
-
-  if (operMode==TARGET_MODE){
-    servoDelta=clamp( (targetPosition - positionCounter)*targetApproach);
-  }
-
-  if (operMode==DIRECTION_MODE && desiredDirection){
-    if (millis() > (lastMillis + accelInterval)){
-      servoDelta+=desiredDirection;
-      lastMillis=millis();
+    for (mbInputRegisters myInReg=0; i++; i<_LAST){
+        switch (myInReg)
+        {
+        case currentPosition:
+            myMb.inputRegisterWrite(myInReg, positionCounter);
+            break;
+        case currentFalseCounter:
+            myMb.inputRegisterWrite(myInReg, falseCounter);
+            break;
+        default:
+            break;
+        }
     }
-    servoDelta=clamp(servoDelta);   
-  } else if (servoDelta) {
-    if (millis() > (lastMillis + accelInterval)){
-      servoDelta+=(servoDelta>0)?DIRECTION_DN:DIRECTION_UP;
-      lastMillis=millis();
-    } 
-  }
 
-  if (millis()>printMillis+1000){
-    Serial.print(desiredDirection);
-    Serial.print(" ");
-    Serial.print(currentDirection);
-    Serial.print(" ");
-    Serial.print(targetPosition);
-    Serial.print(" ");
-    Serial.print(positionCounter);
-    Serial.print(" ");
-    Serial.println(falseCounter);
-    printMillis=millis();
-  }
-  
-  if (Serial.available()) {
-    keyRead=Serial.read();
-    switch (keyRead)
-    {
-      case ']':
-        targetPosition++;
-        break;
-      case '[':
-        targetPosition--;
-        break; 
-       case ')':
-        if ( (accelInterval+=50) > 2000){
-          accelInterval=2000;
+    for (mbCoils myCoil=0; i++; i<_LAST){
+        if myMb.coilRead(myCoil){                   //Coil was set to 1 - command triggered
+            myMb.coilWrite(myCoil,0);               //Reset the coil to 0. Coils used a push-button cmnd triggers
+            switch (myCoil)
+            {
+            case cmdStepUp:
+                targetPosition=moveTargetClamped(targetPosition,runningConfig.stepSize);
+                myMb.inputRegisterWrite(mbInputRegisters::currentTarget,targetPosition);
+                break;
+            case cmdStepDown:
+                targetPosition=moveTargetClamped(targetPosition,-runningConfig.stepSize);
+                myMb.inputRegisterWrite(mbInputRegisters::currentTarget,targetPosition);
+                break;
+            case cmdToggleCalibrationMode:
+                calibrationMode=!calibrationMode;
+                break;
+            case cmdStoreMinPos:
+                runningConfig.minPos=positionCounter;
+                if (runningConfig.minPos>runningConfig.maxPos) {
+                    runningConfig.maxPos=runningConfig.minPos;
+                    myMb.holdingRegisterWrite(mbHoldingRegisters::maxPos,runningConfig.maxPos);
+                }
+                myMb.holdingRegisterWrite(mbHoldingRegisters::minPos,runningConfig.minPos);
+                break;
+            case cmdStoreMaxPos:
+                runningConfig.maxPos=positionCounter;
+                if (runningConfig.maxPos<runningConfig.minPos){
+                    runningConfig.minPos=runningConfig.maxPos;
+                    myMb.holdingRegisterWrite(mbHoldingRegisters::minPos,runningConfig.minPos);
+                }
+                myMb.holdingRegisterWrite(mbHoldingRegisters::maxPos,runningConfig.maxPos);
+                break;
+            case cmdResetTripped:
+                runningConfig.safetyTripped=false;
+                saveConfig=true;
+                break;
+            case cmdResetPosition:
+                positionCounter=0;
+                targetPosition=0;
+                runningConfig.minPos=defaultConfig.minPos;
+                runningConfig.maxPos=defaultConfig.maxPos;
+                break;
+            case cmdFactoryReset:
+                runningConfig=defaultConfig;
+                EEPROM.put(0,defaultConfig);
+                resetFunc();
+            case cmdSaveSettings:
+                calibrationMode=false;
+                saveConfig=true;
+                break;
+            case cmdReboot:
+                resetFunc();
+                break;
+            default:
+                break;
+            }
         }
-        break;
-      case '(':
-        if ((accelInterval-=50)  < 0){
-          accelInterval=0;
-        }
-        break;
-      case 'o':
-        if ( (targetApproach+=0.1) > 10){
-          targetApproach=10;
-        }
-        break;
-      case 'p':
-        if ((targetApproach-=0.1)  < 0.1){
-          targetApproach=0.1;
-        }
-        break;  
-      case '0':
-        servoVal=0;
-        break; 
-      case '1':
-        servoVal=zeroPoint;
-        break; 
-      case '2':
-        servoVal=zeroPoint-FULL_SPEED_DELTA;
-        break; 
-      case '3':
-        servoVal=zeroPoint+FULL_SPEED_DELTA;
-        break; 
-      case 'z':
-        zeroPoint=servoVal;
-        break;
-      case 'u':
-        desiredDirection=DIRECTION_UP;
-        operMode=DIRECTION_MODE;
-        break;              
-      case 'd':
-        desiredDirection=DIRECTION_DN;
-        operMode=DIRECTION_MODE;
-        break;
-      case 's':
-        desiredDirection=DIRECTION_STOP;
-        operMode=DIRECTION_MODE;
-        break;                
-      case 'q':
-        targetPosition=10;
-        operMode=TARGET_MODE;
-        break; 
-      case 'w':
-        targetPosition=40;
-        operMode=TARGET_MODE;
-        break; 
-      case 'e':
-        targetPosition=80;
-        operMode=TARGET_MODE;
-        break;
-      case 'x':
-        targetPosition=positionCounter;
-        break;  
+
     }
-    Serial.print("servo:");
-    Serial.println(servoVal);
-    Serial.print("Accel Interval:");
-    Serial.print(accelInterval);
-    Serial.print("targetApproach:");
-    Serial.println(targetApproach);
-  }
-  if (servoDelta >0){
-    currentDirection=DIRECTION_UP;
-  } else if (servoDelta <0) {
-    currentDirection=DIRECTION_DN;
-  } else {
-    currentDirection=DIRECTION_STOP;
-  }
-  servoVal=zeroPoint+servoDelta;
-  if (servoVal==0){
-    digitalWrite(SERVOPIN,servoVal);
-  } else {
-    analogWrite(SERVOPIN,servoVal); 
-  }
 
+    for (mbHoldingRegisters myReg=0; myReg++; myReg < _LAST) {
+        uint16_t myRegValue=myMb.holdingRegisterRead(myReg);
+        switch (myReg)
+        {
+        case baudRate100x:
+            runningConfig.baudRate100x=myRegValue;
+            break;
+        case slaveId:
+            runningConfig.slaveId=myRegValue;
+            break;
+        case servoZero:
+            runningConfig.servoZero=myRegValue;
+            break;
+        case fullSpeedDelta:
+            runningConfig.fullSpeedDelta=myRegValue;
+            break;
+        case targetApproach10x:
+            runningConfig.targetApproach10x=myRegValue;
+            break;
+        case minPos:
+            runningConfig.minPos=myRegValue;
+            break;
+        case maxPos:
+            runningConfig.maxPos=myRegValue;
+            break;
+        case stepSize:
+            runningConfig.stepSize=myRegValue;
+            break;
+        case safetyInterval:
+            runningConfig.safetyInterval=myRegValue;
+            break;
+        case reqTargetPosition:
+            if (myRegValue!=UINT16_MAX) {
+                targetPosition=moveTargetClamped(myRegValue,0);
+                myMb.holdingRegisterWrite(myReg,UINT16_MAX);
+            }
+            myMb.inputRegisterWrite(mbInputRegisters::currentTarget,targetPosition);
+            break;
+        case reqPercentPosition:
+            if (myRegValue!=UINT16_MAX) {
+                targetPosition=moveToPercentPos(myRegValue,);
+                myMb.holdingRegisterWrite(myReg,UINT16_MAX);
+            }
+            myMb.inputRegisterWrite(mbInputRegisters::currentTarget,targetPosition);
+            break;
+        default:
+            break;
+        }
+    }
+
+    servoDelta=servoClamp(((targetPosition - positionCounter)*(int)runningConfig.targetApproach10x)/10);
+
+    if (servoDelta >0){
+        currentDirection=DIRECTION_UP;
+    } else if (servoDelta <0) {
+        currentDirection=DIRECTION_DN;
+    } else {
+        currentDirection=DIRECTION_STOP;
+    }
+    servoVal=runningConfig.servoZero+servoDelta;
+    if (servoVal==0){
+        digitalWrite(SERVOPIN,servoVal);
+    } else {
+        analogWrite(SERVOPIN,servoVal); 
+    }
 }
-
 
 void updateCounter(){
-  positionCounter+=currentDirection;
-  if (!currentDirection){
-    falseCounter++;
-  }
+    positionCounter+=currentDirection;
+    if (!currentDirection){
+        falseCounter++;
+    }
 }
 
-int clamp(int servoDelta){
-  if (servoDelta > FULL_SPEED_DELTA) {
-    servoDelta=FULL_SPEED_DELTA;
-  } else if (servoDelta < -FULL_SPEED_DELTA){
-    servoDelta=-FULL_SPEED_DELTA;
-  }
-  return servoDelta; 
+int servoClamp(int servoDelta){
+    if (servoDelta > runningConfig.fullSpeedDelta) {
+        servoDelta=runningConfig.fullSpeedDelta;
+    } else if (servoDelta < -runningConfig.fullSpeedDelta){
+        servoDelta=-runningConfig.fullSpeedDelta;
+    }
+    return servoDelta; 
 }
+
+int16_t moveTargetClamped(int16_t startTarget, int16_t offset){
+    int newTarget=(int)startTarget + int(offset);
+    if (newTarget>INT16_MAX) newTarget=INT16_MAX;
+    else if (newTarget<INT16_MIN) newTarget=INT16_MIN;
+    if (!calibrationMode){
+        if (newTarget>runningConfig.maxPos) newTarget=runningConfig.maxPos;
+        else if (newTarget<runningConfig.minPos) newTarget=runningConfig.minPos;
+    }
+    return newTarget;
+}
+
+int16_t moveToPercentPos(int percentPos){
+    if (percentPos>100) percentPos=100;
+    if (percentPos<0) percentPos=0;
+    int rangeOfMotion = (runningConfig.maxPos - runningConfig.minPos);
+    return moveTargetClamped( rangeOfMotion* percentPos/100 + runningConfig.minPos,0);
+}
+
+void(* resetFunc) (void) = 0;
