@@ -5,14 +5,14 @@
 #define DIRECTION_UP 1
 #define DIRECTION_DN -1
 #define DIRECTION_STOP 0
-#define FULL_SPEED_DELTA 15
+#define FULL_SPEED_DELTA 85
 #define DIRECTION_MODE 0
 #define TARGET_MODE 1
 
-//Servo myservo;
+Servo myservo;
 int servoVal=0;
 int servoDelta=0;
-int zeroPoint=184;
+int zeroPoint=90;
 int positionCounter=0;
 int falseCounter=0;
 
@@ -22,6 +22,7 @@ int currentDirection=0;
 int desiredDirection=0;
 int targetPosition=0;
 float targetApproach=3.0;
+bool power=true;
 
 int accelInterval=200;
 
@@ -32,7 +33,7 @@ int potread=0;
 char keyRead;
 void setup() {
   // put your setup code here, to run once:
-  //myservo.attach(SERVOPIN);
+  myservo.attach(SERVOPIN);
   Serial.begin(115200);
   //while (!Serial);
   Serial.println("Finished init");
@@ -57,29 +58,27 @@ void loop() {
     servoDelta=clamp( (targetPosition - positionCounter)*targetApproach);
   }
 
-  if (operMode==DIRECTION_MODE && desiredDirection){
-    if (millis() > (lastMillis + accelInterval)){
-      servoDelta+=desiredDirection;
-      lastMillis=millis();
-    }
-    servoDelta=clamp(servoDelta);   
-  } else if (servoDelta) {
-    if (millis() > (lastMillis + accelInterval)){
-      servoDelta+=(servoDelta>0)?DIRECTION_DN:DIRECTION_UP;
-      lastMillis=millis();
-    } 
-  }
+//  if (operMode==DIRECTION_MODE && desiredDirection){
+//    if (millis() > (lastMillis + accelInterval)){
+//      servoDelta+=desiredDirection;
+//      lastMillis=millis();
+//    }
+//    servoDelta=clamp(servoDelta);   
+//  } else if (servoDelta) {
+//    if (millis() > (lastMillis + accelInterval)){
+//      servoDelta+=(servoDelta>0)?DIRECTION_DN:DIRECTION_UP;
+//      lastMillis=millis();
+//    } 
+//  }
 
   if (millis()>printMillis+1000){
-    Serial.print(desiredDirection);
+    Serial.print(servoDelta);
     Serial.print(" ");
-    Serial.print(currentDirection);
+    Serial.print(power);
     Serial.print(" ");
-    Serial.print(targetPosition);
+    Serial.print(servoVal);
     Serial.print(" ");
-    Serial.print(positionCounter);
-    Serial.print(" ");
-    Serial.println(falseCounter);
+    Serial.println(zeroPoint);
     printMillis=millis();
   }
   
@@ -93,28 +92,8 @@ void loop() {
       case '[':
         targetPosition--;
         break; 
-       case ')':
-        if ( (accelInterval+=50) > 2000){
-          accelInterval=2000;
-        }
-        break;
-      case '(':
-        if ((accelInterval-=50)  < 0){
-          accelInterval=0;
-        }
-        break;
-      case 'o':
-        if ( (targetApproach+=0.1) > 10){
-          targetApproach=10;
-        }
-        break;
-      case 'p':
-        if ((targetApproach-=0.1)  < 0.1){
-          targetApproach=0.1;
-        }
-        break;  
       case '0':
-        servoVal=0;
+        servoDelta=0;
         break; 
       case '1':
         servoVal=zeroPoint;
@@ -125,16 +104,21 @@ void loop() {
       case '3':
         servoVal=zeroPoint+FULL_SPEED_DELTA;
         break; 
+      case 'p':
+        power=!power;
+        break;
       case 'z':
         zeroPoint=servoVal;
         break;
       case 'u':
-        desiredDirection=DIRECTION_UP;
-        operMode=DIRECTION_MODE;
+        //desiredDirection=DIRECTION_UP;
+        //operMode=DIRECTION_MODE;
+        servoDelta++;
         break;              
       case 'd':
-        desiredDirection=DIRECTION_DN;
-        operMode=DIRECTION_MODE;
+        //desiredDirection=DIRECTION_DN;
+        //operMode=DIRECTION_MODE;
+        servoDelta--;
         break;
       case 's':
         desiredDirection=DIRECTION_STOP;
@@ -156,8 +140,8 @@ void loop() {
         targetPosition=positionCounter;
         break;  
     }
-    Serial.print("servo:");
-    Serial.println(servoVal);
+    Serial.print("servoDelta:");
+    Serial.println(servoDelta);
     Serial.print("Accel Interval:");
     Serial.print(accelInterval);
     Serial.print("targetApproach:");
@@ -171,11 +155,19 @@ void loop() {
     currentDirection=DIRECTION_STOP;
   }
   servoVal=zeroPoint+servoDelta;
-  if (servoVal==0){
-    digitalWrite(SERVOPIN,servoVal);
+
+  if (power){
+    myservo.write(servoVal);
   } else {
-    analogWrite(SERVOPIN,servoVal); 
+    myservo.writeMicroseconds(0);
   }
+
+
+//   if (servoVal==0){
+//     digitalWrite(SERVOPIN,servoVal);
+//   } else {
+//     analogWrite(SERVOPIN,servoVal); 
+//   }
 
 }
 
