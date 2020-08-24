@@ -1,4 +1,4 @@
-#include <Servo.h>
+//#include <Servo.h>
 #define SERVOPIN 3
 #define COUNTERPIN 2
 #define POTPIN A0
@@ -66,7 +66,7 @@ void loop() {
   }
 
 //  if (operMode==DIRECTION_MODE && desiredDirection){
-//    if (millis() > (lastMillis + accelInterval)){
+//    if (millis() > (lastMillis + accelInterval))
 //      servoDelta+=desiredDirection;
 //      lastMillis=millis();
 //    }
