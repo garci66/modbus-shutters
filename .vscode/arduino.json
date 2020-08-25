@@ -1,0 +1,8 @@
+{
+    "board": "arduino:avr:pro",
+    "configuration": "cpu=16MHzatmega328",
+    "programmer": "AVRISP mkII",
+    "sketch": "serial-servo.ino",
+    "port": "COM4",
+    "output": "../ArduinoOutput"
+}
