@@ -81,7 +81,7 @@ void loop() {
         }
     }
 
-    if (currentDirection && lastDirection!=currentDirection){
+    if (currentDirection && (lastDirection!=currentDirection)){
         //we just started moving so lets make sure we dont trip the safetyInterval accidentally;
         lastCounterTick=millis();
         lastMotionStart=lastCounterTick;
@@ -94,19 +94,19 @@ void loop() {
         OCR2B = servoVal;
     }
 
-    if (!runningConfig.safetyTripped){
-        if (currentDirection && (millis()> (lastCounterTick + runningConfig.safetyInterval))){
-            //We should be moving and we arent!
-            runningConfig.safetyTripped=true;
-            saveConfig=true;
-        }
-        if (currentDirection && millis()> lastMotionStart + runningConfig.maxRuntimeS*1000){
-            runningConfig.safetyTripped=true;
-            saveConfig=true;
-        }
-    }
+    // if (!runningConfig.safetyTripped){
+    //     if (currentDirection && (millis()> (lastCounterTick + runningConfig.safetyInterval))){
+    //         //We should be moving and we arent!
+    //         runningConfig.safetyTripped=true;
+    //         saveConfig=true;
+    //     }
+    //     if (currentDirection && millis()> lastMotionStart + runningConfig.maxRuntimeS*1000){
+    //         runningConfig.safetyTripped=true;
+    //         saveConfig=true;
+    //     }
+    // }
 
-    if (saveConfig){
+    if (saveConfig && !calibrationMode){
         runningConfig.lastPos=positionCounter;
         EEPROM.put(0,runningConfig);
         saveConfig=false;
@@ -134,7 +134,7 @@ int servoClamp(int servoDelta){
 }
 
 int16_t moveTargetClamped(int16_t startTarget, int16_t offset){
-    int newTarget=(int)startTarget + int(offset);
+    int newTarget=(int)startTarget + (int)offset;
     if (newTarget>INT16_MAX) newTarget=INT16_MAX;
     else if (newTarget<INT16_MIN) newTarget=INT16_MIN;
     if (!calibrationMode){
@@ -162,16 +162,19 @@ void updateMBInputs(void){
         switch (myInput)
         {
         case mbInputs::atBottom:
-            myMb.inputRegisterWrite((int)myInput, positionCounter==runningConfig.minPos);
+            myMb.discreteInputWrite((int)myInput, positionCounter==runningConfig.minPos);
             break;
         case mbInputs::atTop:
-            myMb.inputRegisterWrite((int)myInput, positionCounter==runningConfig.maxPos);
+            myMb.discreteInputWrite((int)myInput, positionCounter==runningConfig.maxPos);
             break;
         case mbInputs::safetyTripped:
-            myMb.inputRegisterWrite((int)myInput, runningConfig.safetyTripped);
+            myMb.discreteInputWrite((int)myInput, runningConfig.safetyTripped);
             break;
         case mbInputs::isCalibrationMode:
-            myMb.inputRegisterWrite((int)myInput, calibrationMode);
+            myMb.discreteInputWrite((int)myInput, calibrationMode);
+            break;
+        case mbInputs::allwaysTrue:
+            myMb.discreteInputWrite((int)myInput, true);
             break;
         default:
             break;
@@ -189,6 +192,15 @@ void updateMBInputRegs(void){
         case mbInputRegisters::currentFalseCounter:
             myMb.inputRegisterWrite((int)myInReg, falseCounter);
             break;
+        case mbInputRegisters::currentTarget:
+            myMb.inputRegisterWrite((int)myInReg, targetPosition);
+            break;
+        case mbInputRegisters::currentDelta:
+            myMb.inputRegisterWrite((int)myInReg, servoDelta);
+            break;
+        case mbInputRegisters::currentServoValue:
+            myMb.inputRegisterWrite((int)myInReg, servoVal);
+            break;
         default:
             break;
         }
@@ -203,11 +215,9 @@ void updateMBCoils(void){
             {
             case mbCoils::cmdStepUp:
                 targetPosition=moveTargetClamped(targetPosition,runningConfig.stepSize);
-                myMb.inputRegisterWrite((int)mbInputRegisters::currentTarget,targetPosition);
                 break;
             case mbCoils::cmdStepDown:
                 targetPosition=moveTargetClamped(targetPosition,-runningConfig.stepSize);
-                myMb.inputRegisterWrite((int)mbInputRegisters::currentTarget,targetPosition);
                 break;
             case mbCoils::cmdToggleCalibrationMode:
                 calibrationMode=!calibrationMode;
@@ -297,19 +307,20 @@ void updateMBHoldingRegs(void){
         case mbHoldingRegisters::safetyInterval:
             runningConfig.safetyInterval=myRegValue;
             break;
+        case mbHoldingRegisters::maxRuntimeS:
+            runningConfig.maxRuntimeS=myRegValue;
+            break;
         case mbHoldingRegisters::reqTargetPosition:
             if (myRegValue!=UINT16_MAX) {
                 targetPosition=moveTargetClamped(myRegValue,0);
                 myMb.holdingRegisterWrite((int)myReg,UINT16_MAX);
             }
-            myMb.inputRegisterWrite((int)mbInputRegisters::currentTarget,targetPosition);
             break;
         case mbHoldingRegisters::reqPercentPosition:
             if (myRegValue!=UINT16_MAX) {
                 targetPosition=moveToPercentPos(myRegValue);
                 myMb.holdingRegisterWrite((int)myReg,UINT16_MAX);
             }
-            myMb.inputRegisterWrite((int)mbInputRegisters::currentTarget,targetPosition);
             break;
         default:
             break;
@@ -354,6 +365,9 @@ void updateMBHoldingRegsFromConfig(void){
             break;
         case mbHoldingRegisters::safetyInterval:
             myMb.holdingRegisterWrite((int)myReg,runningConfig.safetyInterval);  
+            break;
+        case mbHoldingRegisters::maxRuntimeS:
+            myMb.holdingRegisterWrite((int)myReg,runningConfig.maxRuntimeS);  
             break;
         case mbHoldingRegisters::reqTargetPosition:
             myMb.holdingRegisterWrite((int)myReg,UINT16_MAX);  

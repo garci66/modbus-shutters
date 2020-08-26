@@ -8,7 +8,7 @@
 #include <avr/wdt.h>
 
 #define GARCI_MAGIC 0xD6CC
-#define GARCI_VERSION 1
+#define GARCI_VERSION 3
 
 #define DIRECTION_UP 1
 #define DIRECTION_DN -1
@@ -16,9 +16,9 @@
 #define MODBUS_UPDATE_INTERVAL 100
 
 enum class mbCoils {_START, cmdStepUp=_START, cmdStepDown, cmdUp, cmdDn, cmdToggleCalibrationMode, cmdStoreMinPos, cmdStoreMaxPos, cmdResetTripped, cmdResetPosition, cmdSaveSettings, cmdReboot, cmdFactoryReset, _LAST};
-enum class mbInputs {_START, atTop=_START, atBottom, safetyTripped, isCalibrationMode, _LAST};
-enum class mbHoldingRegisters {_START, baudRate100x=_START, slaveId, pwmPreScaler, servoZero, fullSpeedDelta, targetApproach10x, deadBand, minPos, maxPos, stepSize, safetyInterval, reqTargetPosition, reqPercentPosition,  _LAST};
-enum class mbInputRegisters {_START, currentPosition=_START, currentPercentPosition, currentFalseCounter, currentTarget, _LAST};
+enum class mbInputs {_START, atTop=_START, atBottom, safetyTripped, isCalibrationMode, allwaysTrue, _LAST};
+enum class mbHoldingRegisters {_START, baudRate100x=_START, slaveId, pwmPreScaler, servoZero, fullSpeedDelta, targetApproach10x, deadBand, minPos, maxPos, stepSize, safetyInterval, maxRuntimeS, reqTargetPosition, reqPercentPosition,  _LAST};
+enum class mbInputRegisters {_START, currentPosition=_START, currentPercentPosition, currentFalseCounter, currentTarget, currentDelta, currentServoValue, _LAST};
 
 inline mbCoils& operator++(mbCoils& d,int)  {  return d=static_cast<mbCoils>(static_cast<int>(d)+1);  }; 
 inline mbInputs& operator++(mbInputs& d,int)  {  return d=static_cast<mbInputs>(static_cast<int>(d)+1);  }; 
@@ -52,8 +52,8 @@ struct config defaultConfig {
     5,                  //pwmPreScaler
     185,                //servoZero
     16,                 //fullSpeedDelta
-    30,                 //targetApproach10x
-    2,                  //deadBand
+    40,                 //targetApproach10x
+    3,                  //deadBand
     0,                  //lastPos
     INT16_MIN,          //minPos
     INT16_MAX,          //maxPos
